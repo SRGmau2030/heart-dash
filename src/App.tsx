@@ -242,6 +242,9 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
     const H = Math.round(W / ASPECT);
     canvas.width = W;
     canvas.height = H;
+
+    // ── Scale factor (relative to 800px reference width) ───────
+    const S = W / 800;
     const ctx = canvas.getContext('2d')!;
 
     // ── Audio (Web Audio API) ──────────────────────────────────
@@ -300,10 +303,12 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
     }
 
     // ── Game constants ─────────────────────────────────────────
-    const GRAVITY = 2600;        // px/s²
-    const JUMP_VEL = -870;       // px/s (up)
-    const BASE_SPEED = 300;      // px/s
-    const FLOOR_Y = H - 48;      // top of floor
+    const GRAVITY = 2600 * S;    // px/s² (scaled)
+    const JUMP_VEL = -870 * S;   // px/s (up, scaled)
+    const BASE_SPEED = 300 * S;  // px/s (scaled)
+    const FLOOR_H = Math.round(48 * S);
+    const FLOOR_Y = H - FLOOR_H; // top of floor
+    const OBJ_SIZE = Math.round(48 * S); // obstacle & player size
 
     // ── State ──────────────────────────────────────────────────
     interface Rect { x: number; y: number; w: number; h: number }
@@ -315,7 +320,7 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
     let rafId = 0;
 
     const player: Rect & { vy: number; grounded: boolean } = {
-      x: 80, y: FLOOR_Y - 42, w: 38, h: 38, vy: 0, grounded: true,
+      x: Math.round(80 * S), y: FLOOR_Y - OBJ_SIZE, w: OBJ_SIZE, h: OBJ_SIZE, vy: 0, grounded: true,
     };
 
     const obstacles: Rect[] = [];
@@ -367,7 +372,7 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
       if (obstacleTimer >= obstacleInterval) {
         obstacleTimer = 0;
         obstacleInterval = 0.8 + Math.random() * 1.0;
-        obstacles.push({ x: W, y: FLOOR_Y - 48, w: 48, h: 48 });
+        obstacles.push({ x: W, y: FLOOR_Y - OBJ_SIZE, w: OBJ_SIZE, h: OBJ_SIZE });
       }
       for (let i = obstacles.length - 1; i >= 0; i--) {
         obstacles[i].x -= speed * dt;
@@ -379,8 +384,8 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
       if (crossTimer >= crossInterval) {
         crossTimer = 0;
         crossInterval = 1.5 + Math.random() * 1.5;
-        // Rango: 130–180 px sobre el piso — más alto que antes pero siempre alcanzable
-        crosses.push({ x: W, y: FLOOR_Y - 130 - Math.random() * 50 });
+        // Rango: 130–180 px sobre el piso (escalado) — siempre alcanzable
+        crosses.push({ x: W, y: FLOOR_Y - Math.round(130 * S) - Math.random() * Math.round(50 * S) });
       }
       for (let i = crosses.length - 1; i >= 0; i--) {
         crosses[i].x -= BASE_SPEED * dt;
@@ -388,7 +393,8 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
       }
 
       // Collision — obstacles
-      const pRect: Rect = { x: player.x + 4, y: player.y + 4, w: player.w - 8, h: player.h - 4 };
+      const margin = Math.round(4 * S);
+      const pRect: Rect = { x: player.x + margin, y: player.y + margin, w: player.w - margin * 2, h: player.h - margin };
       for (const obs of obstacles) {
         if (overlaps(pRect, obs)) {
           dead = true;
@@ -402,9 +408,10 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
       }
 
       // Collision — crosses
+      const cHalf = Math.round(14 * S);
       for (let i = crosses.length - 1; i >= 0; i--) {
         const c = crosses[i];
-        const cRect: Rect = { x: c.x - 14, y: c.y - 14, w: 28, h: 28 };
+        const cRect: Rect = { x: c.x - cHalf, y: c.y - cHalf, w: cHalf * 2, h: cHalf * 2 };
         if (overlaps(pRect, cRect)) {
           crosses.splice(i, 1);
           score++;
@@ -420,19 +427,19 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
 
       // Floor
       ctx.fillStyle = '#14141e';
-      ctx.fillRect(0, FLOOR_Y, W, 48);
+      ctx.fillRect(0, FLOOR_Y, W, FLOOR_H);
       ctx.strokeStyle = '#3c3c50';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(0, FLOOR_Y, W, 48);
+      ctx.lineWidth = Math.max(1, Math.round(2 * S));
+      ctx.strokeRect(0, FLOOR_Y, W, FLOOR_H);
 
       // Obstacles
       for (const obs of obstacles) {
         ctx.fillStyle = '#1c1216';
-        drawRoundRect(ctx, obs.x, obs.y, obs.w, obs.h, 8);
+        drawRoundRect(ctx, obs.x, obs.y, obs.w, obs.h, Math.round(8 * S));
         ctx.fill();
         ctx.strokeStyle = '#8c1e32';
-        ctx.lineWidth = 3;
-        drawRoundRect(ctx, obs.x, obs.y, obs.w, obs.h, 8);
+        ctx.lineWidth = Math.max(1, Math.round(3 * S));
+        drawRoundRect(ctx, obs.x, obs.y, obs.w, obs.h, Math.round(8 * S));
         ctx.stroke();
       }
 
@@ -455,7 +462,7 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
       ctx.fillStyle = bgWhite ? '#000000' : '#ffffff';
       ctx.textBaseline = 'top';
       ctx.textAlign = 'left';
-      ctx.fillText(`Dones: ${score}`, 24, 24);
+      ctx.fillText(`Dones: ${score}`, Math.round(24 * S), Math.round(24 * S));
 
       rafId = requestAnimationFrame(loop);
     }
