@@ -13,16 +13,4 @@ export default defineConfig({
   server: {
     hmr: process.env.DISABLE_HMR !== 'true',
   },
-  build: {
-    rollupOptions: {
-      // Kaboom v3000 breaks when Vite minifies it.
-      // Load it from CDN (see index.html) so the bundler never touches it.
-      external: ['kaboom'],
-      output: {
-        globals: {
-          kaboom: 'kaboom',
-        },
-      },
-    },
-  },
 });

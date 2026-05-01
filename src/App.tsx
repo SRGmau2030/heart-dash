@@ -5,7 +5,6 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import kaboom from 'kaboom';
 
 type GameScreen = 'start' | 'playing' | 'gameover';
 
@@ -204,7 +203,27 @@ function StartScreen({ onStart }: { onStart: () => void }) {
 }
 
 /* ───────────────────────────────────────────
-   GAME SCREEN
+   CANVAS HELPERS
+   ─────────────────────────────────────────── */
+function drawRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number, r: number
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+/* ───────────────────────────────────────────
+   GAME SCREEN — Pure Canvas API, no kaboom
    ─────────────────────────────────────────── */
 function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -213,214 +232,238 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
   onGameOverRef.current = onGameOver;
 
   useEffect(() => {
-    if (!canvasRef.current || !containerRef.current) return;
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
 
-    let k: ReturnType<typeof kaboom> | null = null;
-    let rafId: number;
-
-    // Calcular dimensiones reales del contenedor para no estirar el canvas
-    const containerWidth = containerRef.current.clientWidth;
+    // ── Canvas sizing ──────────────────────────────────────────
     const ASPECT = 4 / 3;
-    const gameW = Math.min(containerWidth, 800);
-    const gameH = Math.round(gameW / ASPECT);
+    const W = Math.min(container.clientWidth, 800);
+    const H = Math.round(W / ASPECT);
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d')!;
 
-    // Ajustar tamaño del canvas al contenedor antes de que Kaboom lo tome
-    canvasRef.current.width = gameW;
-    canvasRef.current.height = gameH;
+    // ── Audio (Web Audio API) ──────────────────────────────────
+    const audioCtx = new AudioContext();
 
-    rafId = requestAnimationFrame(() => {
-      if (!canvasRef.current) return;
+    function playJump() {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.type = 'sine';
+      const t = audioCtx.currentTime;
+      osc.frequency.setValueAtTime(320, t);
+      osc.frequency.exponentialRampToValueAtTime(640, t + 0.12);
+      gain.gain.setValueAtTime(0.25, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.start(t); osc.stop(t + 0.18);
+    }
 
-      // ── Audio helpers (Web Audio API) ──────────────────────────────────
-      const audioCtx = new AudioContext();
-
-      /** Sonido de salto: chirp ascendente corto */
-      function playJump() {
+    function playCross() {
+      [880, 1320].forEach((freq, i) => {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
+        osc.connect(gain); gain.connect(audioCtx.destination);
         osc.type = 'sine';
-        const t = audioCtx.currentTime;
-        osc.frequency.setValueAtTime(320, t);
-        osc.frequency.exponentialRampToValueAtTime(640, t + 0.12);
-        gain.gain.setValueAtTime(0.25, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
-        osc.start(t);
-        osc.stop(t + 0.18);
-      }
-
-      /** Sonido de cruz: campana brillante de dos notas */
-      function playCross() {
-        [880, 1320].forEach((freq, i) => {
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          osc.type = 'sine';
-          const t = audioCtx.currentTime + i * 0.1;
-          osc.frequency.setValueAtTime(freq, t);
-          gain.gain.setValueAtTime(0.3, t);
-          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
-          osc.start(t);
-          osc.stop(t + 0.4);
-        });
-      }
-
-      /** Sonido de muerte: rumble descendente oscuro */
-      function playDeath() {
-        // Grave descendente
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.type = 'sawtooth';
-        const t = audioCtx.currentTime;
-        osc.frequency.setValueAtTime(220, t);
-        osc.frequency.exponentialRampToValueAtTime(55, t + 0.6);
-        gain.gain.setValueAtTime(0.35, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
-        osc.start(t);
-        osc.stop(t + 0.65);
-        // Golpe de impacto (ruido corto)
-        const bufSize = audioCtx.sampleRate * 0.08;
-        const buffer = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
-        const src = audioCtx.createBufferSource();
-        src.buffer = buffer;
-        const noiseGain = audioCtx.createGain();
-        src.connect(noiseGain);
-        noiseGain.connect(audioCtx.destination);
-        noiseGain.gain.setValueAtTime(0.4, t);
-        noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-        src.start(t);
-      }
-      // ─────────────────────────────────────────────────────────────────
-
-      k = kaboom({
-        canvas: canvasRef.current,
-        background: [10, 10, 10],
-        width: gameW,
-        height: gameH,
-        font: 'sans-serif',
+        const t = audioCtx.currentTime + i * 0.1;
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+        osc.start(t); osc.stop(t + 0.4);
       });
+    }
 
-      k.scene('game', () => {
-        let score = 0;
-        const JUMP_FORCE = 800;
-        const SPEED = 300;
+    function playDeath() {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.type = 'sawtooth';
+      const t = audioCtx.currentTime;
+      osc.frequency.setValueAtTime(220, t);
+      osc.frequency.exponentialRampToValueAtTime(55, t + 0.6);
+      gain.gain.setValueAtTime(0.35, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+      osc.start(t); osc.stop(t + 0.65);
+      // noise burst
+      const bufSize = audioCtx.sampleRate * 0.08;
+      const buffer = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+      const src = audioCtx.createBufferSource();
+      src.buffer = buffer;
+      const ng = audioCtx.createGain();
+      src.connect(ng); ng.connect(audioCtx.destination);
+      ng.gain.setValueAtTime(0.4, t);
+      ng.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+      src.start(t);
+    }
 
-        k.setGravity(2400);
+    // ── Game constants ─────────────────────────────────────────
+    const GRAVITY = 2600;        // px/s²
+    const JUMP_VEL = -870;       // px/s (up)
+    const BASE_SPEED = 300;      // px/s
+    const FLOOR_Y = H - 48;      // top of floor
 
-        const bg = k.add([
-          k.rect(k.width(), k.height()),
-          k.color(0, 0, 0),
-          k.z(-1),
-        ]);
+    // ── State ──────────────────────────────────────────────────
+    interface Rect { x: number; y: number; w: number; h: number }
 
-        // Piso
-        k.add([
-          k.rect(k.width(), 48),
-          k.pos(0, k.height() - 48),
-          k.outline(2, k.rgb(60, 60, 80)),
-          k.area(),
-          k.body({ isStatic: true }),
-          k.color(20, 20, 30),
-          'floor',
-        ]);
+    let score = 0;
+    let dead = false;
+    let bgWhite = false;
+    let lastTime = 0;
+    let rafId = 0;
 
-        // Jugador (Corazón)
-        const player = k.add([
-          k.text('❤️', { size: 48 }),
-          k.pos(80, 40),
-          k.area({ shape: new k.Rect(k.vec2(0), 40, 40) }),
-          k.anchor('center'),
-          k.body(),
-          'player',
-        ]);
+    const player: Rect & { vy: number; grounded: boolean } = {
+      x: 80, y: FLOOR_Y - 42, w: 38, h: 38, vy: 0, grounded: true,
+    };
 
-        // Texto de Puntaje
-        const scoreLabel = k.add([
-          k.text('Dones: 0'),
-          k.pos(24, 24),
-          k.color(255, 255, 255),
-        ]);
+    const obstacles: Rect[] = [];
+    let obstacleTimer = 0;
+    let obstacleInterval = 1.3;
 
-        function jump() {
-          if (player.isGrounded()) {
-            player.jump(JUMP_FORCE);
-            k.shake(2);
-            // Reanudar contexto de audio si el navegador lo suspendió
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            playJump();
-          }
-        }
+    const crosses: { x: number; y: number }[] = [];
+    let crossTimer = 0;
+    let crossInterval = 2.2;
 
-        k.onKeyPress('space', jump);
-        k.onMousePress(jump);
+    // ── Input ──────────────────────────────────────────────────
+    function doJump() {
+      if (player.grounded) {
+        player.vy = JUMP_VEL;
+        player.grounded = false;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        playJump();
+      }
+    }
+    function onKey(e: KeyboardEvent) { if (e.code === 'Space') { e.preventDefault(); doJump(); } }
+    function onPointer() { doJump(); }
+    window.addEventListener('keydown', onKey);
+    canvas.addEventListener('pointerdown', onPointer);
 
-        // Obstáculos
-        function spawnObstacle() {
-          k.add([
-            k.rect(48, 48, { radius: 8 }),
-            k.area(),
-            k.outline(3, k.rgb(140, 30, 50)),
-            k.pos(k.width(), k.height() - 48),
-            k.anchor('botleft'),
-            k.color(28, 18, 22),
-            k.move(k.LEFT, SPEED + score * 15),
-            'obstacle',
-          ]);
-          k.wait(k.rand(0.8, 1.8), spawnObstacle);
-        }
+    // ── AABB ───────────────────────────────────────────────────
+    function overlaps(a: Rect, b: Rect) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
 
-        // Cruces
-        function spawnCross() {
-          k.add([
-            k.text('➕', { size: 30 }),
-            k.area(),
-            k.pos(k.width(), k.rand(k.height() - 200, k.height() - 100)),
-            k.move(k.LEFT, SPEED),
-            'cross',
-          ]);
-          k.wait(k.rand(1.5, 3), spawnCross);
-        }
+    // ── Game loop ──────────────────────────────────────────────
+    function loop(ts: number) {
+      if (dead) return;
+      const dt = Math.min((ts - lastTime) / 1000, 0.05);
+      lastTime = ts;
 
-        spawnObstacle();
-        spawnCross();
+      const speed = BASE_SPEED + score * 15;
 
-        // Colisiones
-        player.onCollide('obstacle', () => {
+      // Physics
+      player.vy += GRAVITY * dt;
+      player.y += player.vy * dt;
+      if (player.y >= FLOOR_Y - player.h) {
+        player.y = FLOOR_Y - player.h;
+        player.vy = 0;
+        player.grounded = true;
+      }
+
+      // Spawn obstacles
+      obstacleTimer += dt;
+      if (obstacleTimer >= obstacleInterval) {
+        obstacleTimer = 0;
+        obstacleInterval = 0.8 + Math.random() * 1.0;
+        obstacles.push({ x: W, y: FLOOR_Y - 48, w: 48, h: 48 });
+      }
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].x -= speed * dt;
+        if (obstacles[i].x + obstacles[i].w < 0) obstacles.splice(i, 1);
+      }
+
+      // Spawn crosses
+      crossTimer += dt;
+      if (crossTimer >= crossInterval) {
+        crossTimer = 0;
+        crossInterval = 1.5 + Math.random() * 1.5;
+        crosses.push({ x: W, y: FLOOR_Y - 100 - Math.random() * 100 });
+      }
+      for (let i = crosses.length - 1; i >= 0; i--) {
+        crosses[i].x -= BASE_SPEED * dt;
+        if (crosses[i].x < -30) crosses.splice(i, 1);
+      }
+
+      // Collision — obstacles
+      const pRect: Rect = { x: player.x + 4, y: player.y + 4, w: player.w - 8, h: player.h - 4 };
+      for (const obs of obstacles) {
+        if (overlaps(pRect, obs)) {
+          dead = true;
           playDeath();
           onGameOverRef.current(score);
-        });
+          return;
+        }
+      }
 
-        player.onCollide('cross', (cross) => {
-          k.destroy(cross);
+      // Collision — crosses
+      for (let i = crosses.length - 1; i >= 0; i--) {
+        const c = crosses[i];
+        const cRect: Rect = { x: c.x - 14, y: c.y - 14, w: 28, h: 28 };
+        if (overlaps(pRect, cRect)) {
+          crosses.splice(i, 1);
           score++;
-          scoreLabel.text = `Dones: ${score}`;
           playCross();
+          if (score >= 3) bgWhite = true;
+        }
+      }
 
-          if (score === 3) {
-            bg.color = k.rgb(255, 255, 255);
-            scoreLabel.color = k.rgb(0, 0, 0);
-          }
-        });
+      // ── Draw ─────────────────────────────────────────────────
+      // Background
+      ctx.fillStyle = bgWhite ? '#ffffff' : '#0a0a0a';
+      ctx.fillRect(0, 0, W, H);
 
-        k.onUpdate(() => {
-          if (score >= 3) {
-            bg.color = k.rgb(255, 255, 255);
-          }
-        });
-      });
+      // Floor
+      ctx.fillStyle = '#14141e';
+      ctx.fillRect(0, FLOOR_Y, W, 48);
+      ctx.strokeStyle = '#3c3c50';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(0, FLOOR_Y, W, 48);
 
-      k.go('game');
-    }); // end requestAnimationFrame
+      // Obstacles
+      for (const obs of obstacles) {
+        ctx.fillStyle = '#1c1216';
+        drawRoundRect(ctx, obs.x, obs.y, obs.w, obs.h, 8);
+        ctx.fill();
+        ctx.strokeStyle = '#8c1e32';
+        ctx.lineWidth = 3;
+        drawRoundRect(ctx, obs.x, obs.y, obs.w, obs.h, 8);
+        ctx.stroke();
+      }
+
+      // Crosses
+      ctx.font = `${Math.round(W * 0.04)}px serif`;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      for (const c of crosses) {
+        ctx.fillText('➕', c.x, c.y);
+      }
+
+      // Player (heart emoji)
+      ctx.font = `${Math.round(W * 0.058)}px serif`;
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.fillText('❤️', player.x - 4, player.y - 2);
+
+      // Score
+      ctx.font = `bold ${Math.round(W * 0.025)}px sans-serif`;
+      ctx.fillStyle = bgWhite ? '#000000' : '#ffffff';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.fillText(`Dones: ${score}`, 24, 24);
+
+      rafId = requestAnimationFrame(loop);
+    }
+
+    rafId = requestAnimationFrame((ts) => { lastTime = ts; loop(ts); });
 
     return () => {
+      dead = true;
       cancelAnimationFrame(rafId);
-      k?.quit();
+      window.removeEventListener('keydown', onKey);
+      canvas.removeEventListener('pointerdown', onPointer);
+      audioCtx.close().catch(() => {});
     };
   }, []);
 
@@ -439,7 +482,6 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
         </h1>
       </div>
 
-      {/* Contenedor responsivo con relación de aspecto 4:3 fija */}
       <div
         ref={containerRef}
         className="w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl border-2 border-neutral-800"
