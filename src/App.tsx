@@ -392,8 +392,11 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
       for (const obs of obstacles) {
         if (overlaps(pRect, obs)) {
           dead = true;
+          // Reanudar contexto si el navegador lo suspendió (política de autoplay)
+          if (audioCtx.state === 'suspended') audioCtx.resume();
           playDeath();
-          onGameOverRef.current(score);
+          // Esperar 700 ms para que el sonido de muerte termine antes de desmontar
+          setTimeout(() => onGameOverRef.current(score), 700);
           return;
         }
       }
