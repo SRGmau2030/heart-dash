@@ -379,7 +379,8 @@ function GameScreen({ onGameOver }: { onGameOver: (score: number) => void }) {
       if (crossTimer >= crossInterval) {
         crossTimer = 0;
         crossInterval = 1.5 + Math.random() * 1.5;
-        crosses.push({ x: W, y: FLOOR_Y - 100 - Math.random() * 100 });
+        // Rango: 130–180 px sobre el piso — más alto que antes pero siempre alcanzable
+        crosses.push({ x: W, y: FLOOR_Y - 130 - Math.random() * 50 });
       }
       for (let i = crosses.length - 1; i >= 0; i--) {
         crosses[i].x -= BASE_SPEED * dt;
