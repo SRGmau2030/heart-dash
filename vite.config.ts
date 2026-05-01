@@ -13,4 +13,12 @@ export default defineConfig({
   server: {
     hmr: process.env.DISABLE_HMR !== 'true',
   },
+  optimizeDeps: {
+    include: ['kaboom'],
+  },
+  build: {
+    commonjsOptions: {
+      include: [/kaboom/, /node_modules/],
+    },
+  },
 });
